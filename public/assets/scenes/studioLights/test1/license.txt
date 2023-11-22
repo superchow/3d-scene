@@ -1,0 +1,11 @@
+Model Information:
+* title:	Green screen studio with a softbox
+* source:	https://sketchfab.com/3d-models/green-screen-studio-with-a-softbox-e5fe0a43be604560bce847329494b912
+* author:	vojtaklemperer (https://sketchfab.com/vojtaklemperer)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Green screen studio with a softbox" (https://sketchfab.com/3d-models/green-screen-studio-with-a-softbox-e5fe0a43be604560bce847329494b912) by vojtaklemperer (https://sketchfab.com/vojtaklemperer) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
