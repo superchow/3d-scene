@@ -6,14 +6,16 @@ import {
   DirectionalLight,
   EventState,
   FreeCamera,
+  GizmoManager,
+  GlowLayer,
   GroundMesh,
   HemisphericLight,
   HighlightLayer,
   KeyboardEventTypes,
-  Light,
   LightGizmo,
   Mesh,
   MeshBuilder,
+  MirrorTexture,
   Nullable,
   PointLight,
   PointerEventTypes,
@@ -27,21 +29,18 @@ import {
   Vector3,
 } from '@babylonjs/core'
 // loader 必须添加
-import {
-  AdvancedDynamicTexture,
-  Control,
-  Slider,
-  StackPanel,
-  TextBlock,
-} from '@babylonjs/gui'
+import { Slider, StackPanel, TextBlock } from '@babylonjs/gui'
 import '@babylonjs/loaders/glTF'
 // import '@babylonjs/loaders/OBJ'
+import { CameraOutlined } from '@ant-design/icons'
 import { PBRCustomMaterial } from '@babylonjs/materials'
+import { Divider } from 'antd'
 import SceneComponent from 'babylonjs-hook'
 import * as CANNON from 'cannon'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import './App.css'
-import { getMeshTopParent, showNormals, showWorldAxis } from './uitls'
+import './App.less'
+import { LightsSettingsComponent } from './components/lights'
+import { getMeshTopParent, showNormals } from './uitls'
 
 BabylonFileLoaderConfiguration.LoaderInjectedPhysicsEngine = CANNON
 
@@ -86,7 +85,15 @@ function App() {
     currentMesh: AbstractMesh
   }>()
 
-  const [cameraRotation, setCameraRotation] = useState<Vector3>(new Vector3(0, 1.22 * Math.PI, 0))
+  const [cameraRotation, setCameraRotation] = useState<Vector3>(
+    new Vector3(0, 1.22 * Math.PI, 0),
+  )
+
+  const [gizmoManager, setGizmoManager] = useState<GizmoManager>()
+  const [positionGizmoEnabled, setPositionGizmoEnabled] =
+    useState<boolean>(true)
+  const [rotationGizmoEnabled, setRotationGizmoEnabled] =
+    useState<boolean>(true)
 
   const onResize = useCallback(() => {
     currentScene?.getEngine()?.resize()
@@ -99,6 +106,16 @@ function App() {
     scene.shadowsEnabled = true
     scene.useRightHandedSystem = true
     // scene.createDefaultEnvironment({ createGround: false, sizeAuto: true })
+
+    const godCamera = new FreeCamera(
+      'camera-god',
+      new Vector3(0, 200, 0),
+      scene,
+    )
+    godCamera.setTarget(Vector3.Zero())
+    godCamera.attachControl(canvas, false)
+    godCamera.inputs.removeMouse()
+    godCamera.inputs.addMouseWheel()
 
     const camera = new ArcRotateCamera(
       'Camera',
@@ -119,6 +136,8 @@ function App() {
     // 相机最远距离
     camera.maxZ = 1000
 
+    scene.activeCamera = camera
+
     /** 半球光 */
     const envLight = new HemisphericLight(
       'envLight',
@@ -128,7 +147,7 @@ function App() {
     envLight.intensity = 0.6
 
     /** 平行光/太阳光 */
-    const sun = new DirectionalLight('sun', new Vector3(-10, -1, 0), scene)
+    const sun = new DirectionalLight('sun', new Vector3(-10, -8, 0), scene)
     sun.position = new Vector3(100, 1000, 0)
     // sun.lightmapMode = Light.LIGHTMAP_SPECULAR
     sun.diffuse = new Color3(0.94, 0.73, 0.51)
@@ -163,6 +182,24 @@ function App() {
     )
     setGround(ground)
     ground.receiveShadows = true
+    // 创建反射材质
+    const refractionMaterial = new StandardMaterial('refractionMaterial', scene)
+    ground.material = refractionMaterial
+
+    // 设置反射的环境贴图
+    refractionMaterial.refractionTexture = new MirrorTexture(
+      'mirror',
+      512,
+      scene,
+      true,
+    )
+    refractionMaterial.refractionTexture.level = 0.1 // 调整反射强度
+
+    const gizmoManager = new GizmoManager(scene)
+    gizmoManager.positionGizmoEnabled = true
+    gizmoManager.rotationGizmoEnabled = true
+    gizmoManager.attachableMeshes = []
+    setGizmoManager(gizmoManager)
 
     const promises: Promise<any>[] = []
 
@@ -174,14 +211,18 @@ function App() {
       const rootMesh = container.rootNodes[0] as Mesh
       rootMesh.id = '__greenScreenStudio-root__'
       rootMesh.scaling = new Vector3(0.2, 0.2, 0.2)
-      rootMesh.position = new Vector3(0, 0, 0)
+      rootMesh.position = new Vector3(0, -0.55, 0)
       shadowGenerator.addShadowCaster(rootMesh)
       container.addAllToScene()
       showNormals(rootMesh, scene)
+      gizmoManager.attachableMeshes?.push(rootMesh)
 
       container.meshes.forEach((mesh) => {
         mesh.isPickable = false
         mesh.receiveShadows = true
+        if (mesh.name === 'floor.001__0') {
+          mesh.dispose()
+        }
       })
       const emissiveColor = new Color3(0.94, 0.73, 0.51)
       const softMesh = container.meshes.find(
@@ -193,8 +234,8 @@ function App() {
         const hl = new HighlightLayer('hl1', scene)
         hl.addMesh(softMesh, emissiveColor, false)
         const position = softMesh.absolutePosition.clone()
-        const spotLight = new PointLight(
-          'spotLight',
+        const pointLight = new PointLight(
+          'pointLight',
           new Vector3(
             position.x * rootMesh.scaling.x - 1,
             position.y * rootMesh.scaling.y,
@@ -202,19 +243,21 @@ function App() {
           ),
           scene,
         )
-        spotLight.shadowEnabled = true
-        spotLight.diffuse = emissiveColor
-        spotLight.specular = new Color3(0.99, 0.96, 0.67)
-        spotLight.intensity = 300
-        // spotLight.parent = softMesh
+        pointLight.shadowEnabled = true
+        pointLight.diffuse = emissiveColor
+        pointLight.specular = new Color3(0, 0, 0)
+        pointLight.intensity = 0.1
         const pointGizmo = new LightGizmo()
-        pointGizmo.light = spotLight
+        pointGizmo.light = pointLight
 
-        const sg = new ShadowGenerator(1024, spotLight)
+        pointLight.metadata = pointLight.metadata || {}
+        pointLight.metadata.linkMesh = softMesh
+
+        const sg = new ShadowGenerator(1024, pointLight)
         // spotLight.lightmapMode = Light.LIGHTMAP_SPECULAR
         // 抗锯齿
         sg.useBlurExponentialShadowMap = true
-        sg.blurKernel = 1
+        sg.blurKernel = 0
         // 阴影暗度
         sg.setDarkness(0)
         sg.filter = ShadowGenerator.FILTER_PCF
@@ -233,6 +276,81 @@ function App() {
     })
     promises.push(stagePromise)
 
+    const studioLightPromise = SceneLoader.ImportMeshAsync(
+      '',
+      './assets/scenes/studioLights/simple/',
+      'scene.gltf',
+      scene,
+    )
+      .then((assets) => {
+        const rootMesh = assets.meshes[0] as Mesh
+        rootMesh.id = '__simple_studio_light-root__'
+        rootMesh.scaling = new Vector3(10, 10, 10)
+        rootMesh.position.x = -10
+        rootMesh.position.y = 2
+        rootMesh.position.z = 40
+        rootMesh.rotation = new Vector3(0, Math.PI, 0)
+        shadowGenerator.addShadowCaster(rootMesh)
+        gizmoManager.attachableMeshes?.push(rootMesh)
+
+        const emissiveColor = new Color3(1, 0, 0)
+        const spotLightNode = rootMesh.getChildTransformNodes(false, (node) => {
+          return node.name === '#LMP0001_Spotlight'
+        })[0]
+        if (spotLightNode) {
+          const spotLight = new SpotLight(
+            'spotLight',
+            new Vector3(0, 0.3, 0),
+            new Vector3(0, -2, 0),
+            0.5 * Math.PI,
+            10,
+            scene,
+          )
+
+          spotLight.diffuse = emissiveColor
+          spotLight.intensity = 2.4
+          spotLight.parent = spotLightNode
+
+          spotLight.metadata = spotLight.metadata || {}
+          spotLight.metadata.linkMesh = assets.meshes[5]
+
+          const pointGizmo = new LightGizmo()
+          pointGizmo.light = spotLight
+
+          const sg = new ShadowGenerator(1024, spotLight)
+          // 抗锯齿
+          sg.useBlurExponentialShadowMap = true
+          sg.blurKernel = 32
+          // 阴影暗度
+          sg.setDarkness(0)
+          sg.filter = ShadowGenerator.FILTER_PCF
+          // PCF,webgl2可用，在加载性能上有很大提升
+          sg.usePercentageCloserFiltering = true
+          // 透明阴影
+          sg.enableSoftTransparentShadow = true
+          sg.transparencyShadow = true
+          // 偏移量
+          sg.bias = 0.001
+          // 应用于深度防止acnea的偏移量
+          sg.normalBias = 0.002
+        }
+
+        const lampMesh = assets.meshes[5] as Mesh
+        ;(lampMesh.material as PBRCustomMaterial).emissiveColor = emissiveColor
+
+        const gl = new GlowLayer('glow', scene, {
+          mainTextureFixedSize: 1024,
+          blurKernelSize: 64,
+        })
+        gl.intensity = 0.3
+        gl.addIncludedOnlyMesh(lampMesh)
+        gl.referenceMeshToUseItsOwnMaterial(lampMesh)
+      })
+      .catch((reason) => {
+        console.error(`导入失败 ${reason}`)
+      })
+    promises.push(studioLightPromise)
+
     const womanPromise = SceneLoader.ImportMeshAsync(
       '',
       './assets/scenes/woman/',
@@ -243,22 +361,18 @@ function App() {
         const rootMesh = assets.meshes[0]
         rootMesh.id = '__woman-root__'
         rootMesh.scaling = new Vector3(0.01, 0.01, 0.01)
-        rootMesh.position = new Vector3(-14, 9, -10)
+        rootMesh.position = new Vector3(-14, 8.4, -10)
 
         rootMesh.rotation = new Vector3(0, 0.27 * Math.PI, 0)
         shadowGenerator.addShadowCaster(rootMesh)
+        gizmoManager.attachableMeshes?.push(rootMesh)
       })
       .catch((reason) => {
         console.error(`导入失败 ${reason}`)
       })
     promises.push(womanPromise)
 
-    SceneLoader.ImportMeshAsync(
-      '',
-      './assets/camera/',
-      'scene.gltf',
-      scene,
-    )
+    SceneLoader.ImportMeshAsync('', './assets/camera/', 'scene.gltf', scene)
       .then((assets) => {
         const rootMesh = assets.meshes[0]
         rootMesh.id = '__camera-root__'
@@ -267,6 +381,7 @@ function App() {
         rootMesh.position.y = 9
         rootMesh.position.z = 20
         rootMesh.rotation = new Vector3(0, 1.22 * Math.PI, 0)
+        gizmoManager.attachableMeshes?.push(rootMesh)
 
         const freeCamera = new FreeCamera('camera-1', Vector3.Zero(), scene)
         freeCamera.parent = rootMesh
@@ -280,16 +395,25 @@ function App() {
       })
 
     Promise.all(promises).then(() => {
-      const spotLight = scene.getLightByName('spotLight')
-      const sg = spotLight?.getShadowGenerator() as Nullable<ShadowGenerator>
-      if (sg) {
-        const womanMesh = scene.getMeshById('__woman-root__')
-        womanMesh && sg.addShadowCaster(womanMesh)
+      const womanMesh = scene.getMeshById('__woman-root__') as Nullable<Mesh>
+      const greenMesh = scene.getMeshById(
+        '__greenScreenStudio-root__',
+      ) as Nullable<Mesh>
 
-        const houseMesh = scene.getMeshById(
-          '__greenScreenStudio-root__',
-        ) as Nullable<Mesh>
-        houseMesh && sg.addShadowCaster(houseMesh)
+      const pointLight = scene.getLightByName('pointLight')
+      const pointSg =
+        pointLight?.getShadowGenerator() as Nullable<ShadowGenerator>
+      if (pointSg) {
+        womanMesh && pointSg.addShadowCaster(womanMesh)
+        greenMesh && pointSg.addShadowCaster(greenMesh)
+      }
+
+      const spotLight = scene.getLightByName('spotLight')
+      const spotSg =
+        spotLight?.getShadowGenerator() as Nullable<ShadowGenerator>
+      if (spotSg) {
+        womanMesh && spotSg.addShadowCaster(womanMesh)
+        greenMesh && spotSg.addShadowCaster(greenMesh)
       }
     })
   }, [])
@@ -311,10 +435,11 @@ function App() {
   }
 
   const onPointerDown = (pointerInfo: PointerInfo) => {
-    if (
-      pointerInfo.event.button !== 0 ||
-      pointerInfo.pickInfo?.pickedMesh instanceof GroundMesh
-    ) {
+    const isTouchGround = pointerInfo.pickInfo?.pickedMesh instanceof GroundMesh
+    if (isTouchGround) {
+      gizmoManager?.attachToMesh(null)
+    }
+    if (pointerInfo.event.button !== 0 || isTouchGround) {
       return
     }
 
@@ -366,8 +491,10 @@ function App() {
     if (currentScene) {
       // showWorldAxis(currentScene, 500)
       // currentScene.debugLayer.show()
+    }
 
-      currentScene.onPointerObservable.add((pointerInfo) => {
+    const pointerObserver = currentScene?.onPointerObservable.add(
+      (pointerInfo) => {
         switch (pointerInfo.type) {
           case PointerEventTypes.POINTERDOWN:
             onPointerDown(pointerInfo)
@@ -379,11 +506,11 @@ function App() {
             onPointerMove(pointerInfo)
             break
         }
-      })
+      },
+    )
 
-      currentScene.onKeyboardObservable.add((keyboardInfo) => {
-        console.log(keyboardInfo)
-
+    const keyboardObserver = currentScene?.onKeyboardObservable.add(
+      (keyboardInfo) => {
         if (keyboardInfo.event.key.toLowerCase() === 'c') {
           if (keyboardInfo.type === KeyboardEventTypes.KEYDOWN) {
             const currentCamera = currentScene.activeCamera
@@ -398,59 +525,20 @@ function App() {
             } else {
               currentScene.activeCamera = currentScene.cameras[0]
             }
+
+            if (currentScene.activeCamera.name === 'camera-god') {
+              currentScene.getLightByName('envLight')!.intensity = 0.4
+            } else {
+              currentScene.getLightByName('envLight')!.intensity = 0.6
+            }
           }
         }
-      })
-
-      const advancedTexture = AdvancedDynamicTexture.CreateFullscreenUI('UI')
-      const panel = new StackPanel()
-      panel.width = '260px'
-      panel.top = '-25px'
-      panel.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT
-      panel.verticalAlignment = Control.VERTICAL_ALIGNMENT_BOTTOM
-      advancedTexture.addControl(panel)
-
-      addSlider(
-        'camera-roate-x',
-        panel,
-        'camera-roate-x',
-        cameraRotation.x,
-        (value, eventState) => {
-          setCameraRotation(
-            new Vector3(value, cameraRotation.y, cameraRotation.z),
-          )
-        },
-      )
-      addSlider(
-        'camera-roate-y',
-        panel,
-        'camera-roate-y',
-        cameraRotation.y,
-        (value, eventState) => {
-          setCameraRotation(
-            new Vector3(cameraRotation.x, value, cameraRotation.z),
-          )
-        },
-      )
-      addSlider(
-        'camera-roate-z',
-        panel,
-        'camera-roate-z',
-        cameraRotation.z,
-        (value, eventState) => {
-          setCameraRotation(
-            new Vector3(cameraRotation.x, cameraRotation.y, value),
-          )
-        },
-      )
-
-      currentScene.onDispose = () => {
-        advancedTexture.releaseInternalTexture()
-      }
-    }
+      },
+    )
 
     return () => {
-      // advancedTexture.releaseInternalTexture()
+      pointerObserver?.remove()
+      keyboardObserver?.remove()
     }
   }, [currentScene])
 
@@ -461,8 +549,58 @@ function App() {
     cameraMesh.rotation = cameraRotation
   }, [currentScene, cameraRotation])
 
+  // 管理Gizmo
+  useEffect(() => {
+    if (gizmoManager) {
+      gizmoManager.positionGizmoEnabled = positionGizmoEnabled
+      gizmoManager.rotationGizmoEnabled = rotationGizmoEnabled
+      let direction = new Vector3(0, -2, 0)
+      gizmoManager.gizmos.rotationGizmo?.onDragStartObservable.add(() => {
+        const spotLight = currentScene?.getLightByName(
+          'spotLight',
+        ) as Nullable<SpotLight>
+        if (spotLight) {
+          direction = spotLight.direction
+        }
+      })
+      gizmoManager.gizmos.rotationGizmo?.onDragEndObservable.add(() => {
+        const spotLight = currentScene?.getLightByName(
+          'spotLight',
+        ) as Nullable<SpotLight>
+        if (spotLight) {
+          spotLight.direction = direction
+        }
+      })
+    }
+  }, [currentScene, gizmoManager, positionGizmoEnabled, rotationGizmoEnabled])
+
+  const takePhoto = () => {
+    const engine = currentScene?.getEngine()
+    const camera = currentScene?.activeCamera
+
+    if (!engine || !camera) {
+      return
+    }
+    Tools.CreateScreenshot(
+      engine,
+      camera,
+      { precision: 2 },
+      undefined,
+      undefined,
+      true,
+    )
+  }
+
   return (
     <div className='App'>
+      <div className='operation-panel'>
+        <label>
+          截图：
+          <CameraOutlined onClick={takePhoto} />
+        </label>
+        <Divider className='panel-divider' />
+        <LightsSettingsComponent scene={currentScene} />
+      </div>
       <SceneComponent
         id='renderCanvas'
         antialias

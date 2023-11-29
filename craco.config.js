@@ -1,12 +1,33 @@
 const CracoAlias = require('craco-alias')
 const CracoLessPlugin = require('craco-less')
+// const CracoAntDesignPlugin = require('craco-antd')
 const path = require('path')
 const ProgressBarPlugin = require('progress-bar-webpack-plugin')
+const AntdDayjsWebpackPlugin = require('antd-dayjs-webpack-plugin')
 const Chalk = require('chalk')
+const webpack = require('webpack')
 
 module.exports = {
   babel: {
     plugins: [
+      [
+        'import',
+        {
+          libraryName: 'antd',
+          libraryDirectory: 'es',
+          style: true,
+        },
+        'ant',
+      ],
+      [
+        'import',
+        {
+          libraryName: '@ant-design/icons',
+          libraryDirectory: 'es/icons',
+          camel2DashComponentName: false,
+        },
+        '@ant-design/icons',
+      ],
       ['@babel/plugin-proposal-optional-chaining'],
       [
         '@babel/plugin-proposal-decorators',
@@ -30,7 +51,9 @@ module.exports = {
       options: {
         lessLoaderOptions: {
           lessOptions: {
-            modifyVars: {},
+            modifyVars: {
+              '@ant-prefix': 'sidus-3d',
+            },
             javascriptEnabled: true,
           },
         },
@@ -53,6 +76,11 @@ module.exports = {
           ':msg',
         )} ${Chalk.red('(:percent)')}`,
         clear: true,
+      }),
+      new webpack.ContextReplacementPlugin(/moment[/\\]locale$/, /zh-cn/),
+      new AntdDayjsWebpackPlugin({
+        plugins: [],
+        replaceMoment: true,
       }),
     ],
     configure: (webpackConfig) => {
